@@ -1157,10 +1157,10 @@ HexaLab.UI.set_progress_phasename = function( str ){
 
 HexaLab.UI.set_progress_percent = function( num ){
 	return; // doesn't work well enought yet
-	num = num.toFixed(0);
+	/*num = num.toFixed(0);
 	HexaLab.UI.mesh.infobox_2.element.css('background-size', "" + num + '% 100%');
 	force_redraw( HexaLab.UI.mesh.infobox_2.text );
-	force_redraw( HexaLab.UI.mesh.infobox_2.element );
+    force_redraw( HexaLab.UI.mesh.infobox_2.element );*/
 	//console.log("PROGRESS "+num+"%")
 }
 

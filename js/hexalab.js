@@ -18,23 +18,23 @@ HexaLab.BufferGeometry = function (backend) {
 
 Object.assign(HexaLab.BufferGeometry.prototype, {
     update: function () {
-        this.surface.removeAttribute('position')
+        this.surface.deleteAttribute('position')
         const x = this.backend.surface_pos().size()
         if (this.backend.surface_pos().size() != 0) {
             const buffer = new Float32Array(Module.HEAPU8.buffer, this.backend.surface_pos().data(), this.backend.surface_pos().size() * 3)
-            this.surface.addAttribute('position', new THREE.BufferAttribute(buffer, 3))
+            this.surface.setAttribute('position', new THREE.BufferAttribute(buffer, 3))
         }
-        this.surface.removeAttribute('normal')
+        this.surface.deleteAttribute('normal')
         if (this.backend.surface_norm().size() != 0) {
             const buffer = new Float32Array(Module.HEAPU8.buffer, this.backend.surface_norm().data(), this.backend.surface_norm().size() * 3)
-            this.surface.addAttribute('normal', new THREE.BufferAttribute(buffer, 3))
+            this.surface.setAttribute('normal', new THREE.BufferAttribute(buffer, 3))
         } else {
             this.surface.computeVertexNormals()
         }
-        this.surface.removeAttribute('color')
+        this.surface.deleteAttribute('color')
         if (this.backend.surface_color().size() != 0) {
             const buffer = new Float32Array(Module.HEAPU8.buffer, this.backend.surface_color().data(), this.backend.surface_color().size() * 3)
-            this.surface.addAttribute('color', new THREE.BufferAttribute(buffer, 3))
+            this.surface.setAttribute('color', new THREE.BufferAttribute(buffer, 3))
         }
         this.surface.setIndex(null)     // TODO ?
         if (this.backend.surface_ibuffer().size() != 0) {
@@ -48,20 +48,20 @@ Object.assign(HexaLab.BufferGeometry.prototype, {
             this.surface.setIndex(buffer)
         }
 
-        this.wireframe.removeAttribute('position')
+        this.wireframe.deleteAttribute('position')
         if (this.backend.wireframe_pos().size() != 0) {
             const buffer = new Float32Array(Module.HEAPU8.buffer, this.backend.wireframe_pos().data(), this.backend.wireframe_pos().size() * 3)
-            this.wireframe.addAttribute('position', new THREE.BufferAttribute(buffer, 3))
+            this.wireframe.setAttribute('position', new THREE.BufferAttribute(buffer, 3))
         }
-        this.wireframe.removeAttribute('color')
+        this.wireframe.deleteAttribute('color')
         if (this.backend.wireframe_color().size() != 0) {
             const buffer = new Float32Array(Module.HEAPU8.buffer, this.backend.wireframe_color().data(), this.backend.wireframe_color().size() * 3)
-            this.wireframe.addAttribute('color', new THREE.BufferAttribute(buffer, 3))
+            this.wireframe.setAttribute('color', new THREE.BufferAttribute(buffer, 3))
         }
-        this.wireframe.removeAttribute('alpha')
+        this.wireframe.deleteAttribute('alpha')
         if (this.backend.wireframe_alpha().size() != 0) {
             const buffer = new Float32Array(Module.HEAPU8.buffer, this.backend.wireframe_alpha().data(), this.backend.wireframe_alpha().size())
-            this.wireframe.addAttribute('alpha', new THREE.BufferAttribute(buffer, 1))
+            this.wireframe.setAttribute('alpha', new THREE.BufferAttribute(buffer, 1))
         }
     },
 })
@@ -349,8 +349,8 @@ HexaLab.Viewer = function (canvas_width, canvas_height) {
         kernel[i + 2] = v.z * scale
     }
     var noise_size = 4
-    var noise = new Float32Array(noise_size * noise_size * 3)
-    for (var i = 0; i < noise_size * noise_size * 3; i += 3) {
+    var noise = new Float32Array(noise_size * noise_size * 4)
+    for (var i = 0; i < noise_size * noise_size * 4; i += 4) {
         var v = new THREE.Vector3(
             Math.random() * 2.0 - 1.0,
             Math.random() * 2.0 - 1.0,
@@ -359,8 +359,10 @@ HexaLab.Viewer = function (canvas_width, canvas_height) {
         noise[i + 0] = v.x
         noise[i + 1] = v.y
         noise[i + 2] = v.z
+        noise[i + 3] = 0.0
     }
-    var noise_tex = new THREE.DataTexture(noise, noise_size, noise_size, THREE.RGBFormat, THREE.FloatType,
+    // RGBA instead of RGB because of warning from three.js for WebGL 2
+    var noise_tex = new THREE.DataTexture(noise, noise_size, noise_size, THREE.RGBAFormat, THREE.FloatType,
         THREE.UVMapping, THREE.RepeatWrapping, THREE.RepeatWrapping, THREE.NearestFilter, THREE.NearestFilter)
     noise_tex.needsUpdate = true
 
@@ -526,12 +528,31 @@ HexaLab.Viewer = function (canvas_width, canvas_height) {
 Object.assign(HexaLab.Viewer.prototype, {
 
     setup_renderer: function() {
-        this.renderer = new THREE.WebGLRenderer({
+        let contextAttributes = {
             antialias: this.settings.aa == 'msaa',
             preserveDrawingBuffer: true,    // disable hidden/automatic clear of the rendertarget
             alpha: true,                    // to have an alpha on the rendertarget? (needed for setClearAlpha to work)
-        })
-        this.renderer.context.getExtension("EXT_frag_depth")
+        };
+
+        if (WEBGL.isWebGL2ComputeAvailable() === false) {
+            document.getElementById("frame").appendChild(WEBGL.getWebGL2ComputeErrorMessage())
+            this.renderer = new THREE.WebGLRenderer(contextAttributes)
+            
+            // Use this instead of the statement above to use webgl2 instead of webgl
+            /*var canvas = document.createElement("canvas")
+            document.getElementById("frame").appendChild(canvas)
+            var context = canvas.getContext("webgl2", contextAttributes)
+            this.renderer = new THREE.WebGLRenderer({ canvas: canvas, context: context })
+            this.renderer.getContext().getExtension("EXT_float_blend")*/
+        } else {
+            // Use WebGL 2.0 Compute if it is available
+            var canvas = document.createElement("canvas")
+            document.getElementById("frame").appendChild(canvas)
+            var context = canvas.getContext("webgl2-compute", contextAttributes)
+            this.renderer = new THREE.WebGLRenderer({ canvas: canvas, context: context })
+            this.renderer.getContext().getExtension("EXT_float_blend")
+        }
+        this.renderer.getContext().getExtension("EXT_frag_depth")
         this.renderer.setSize(this.width, this.height)
         this.renderer.autoClear = false
         this.renderer.setClearColor(this.settings.background, 1.0)
@@ -683,7 +704,9 @@ Object.assign(HexaLab.Viewer.prototype, {
         const prev_clear_color = this.renderer.getClearColor().clone()
         const prev_clear_alpha = this.renderer.getClearAlpha()
         this.renderer.setClearColor(0x000000, 1.0)
-        this.renderer.clearTarget(tTarget, true, true, true)     // TODO this is not working ?
+        // TODO this is not working ?
+        this.renderer.setRenderTarget(tTarget)
+        this.renderer.clear(true, true, true)
         this.renderer.setClearColor(prev_clear_color, prev_clear_alpha)
 
         // ao pass
@@ -885,9 +908,9 @@ Object.assign(HexaLab.Viewer.prototype, {
         this.silhouette_alpha_pass.material.depthTest = false
         this.fullscreen_quad.material = this.silhouette_alpha_pass.material
 
-        this.renderer.context.colorMask(false, false, false, true)
+        this.renderer.getContext().colorMask(false, false, false, true)
         this.renderer.render(this.scene, this.fullscreen_camera)
-        this.renderer.context.colorMask(true, true, true, true)
+        this.renderer.getContext().colorMask(true, true, true, true)
 
         this.clear_scene()
         this.scene.add(this.renderables.full.surface)
@@ -900,9 +923,9 @@ Object.assign(HexaLab.Viewer.prototype, {
         this.silhouette_alpha_pass.material.polygonOffset = true
         this.scene.overrideMaterial = this.silhouette_alpha_pass.material
         
-        this.renderer.context.colorMask(false, false, false, true)
+        this.renderer.getContext().colorMask(false, false, false, true)
         this.renderer.render(this.scene, this.scene_camera)
-        this.renderer.context.colorMask(true, true, true, true)
+        this.renderer.getContext().colorMask(true, true, true, true)
 
         this.silhouette_alpha_pass.material.polygonOffset = false
 
@@ -923,9 +946,9 @@ Object.assign(HexaLab.Viewer.prototype, {
         this.silhouette_alpha_pass.material.depthTest = false
         this.fullscreen_quad.material = this.silhouette_alpha_pass.material
 
-        this.renderer.context.colorMask(false, false, false, true)
+        this.renderer.getContext().colorMask(false, false, false, true)
         this.renderer.render(this.scene, this.fullscreen_camera)
-        this.renderer.context.colorMask(true, true, true, true)
+        this.renderer.getContext().colorMask(true, true, true, true)
 
         this.clear_scene()
     },
@@ -944,7 +967,7 @@ Object.assign(HexaLab.Viewer.prototype, {
     },
 
     clear_canvas: function () {
-        this.renderer.setRenderTarget()
+        this.renderer.setRenderTarget(null)
         this.renderer.clear()
     },
 
@@ -978,11 +1001,15 @@ Object.assign(HexaLab.Viewer.prototype, {
 
         // bind material, draw
         this.scene.overrideMaterial = this.depth_pass.material
-        this.renderer.render(this.scene, this.scene_camera, this.depth_pass.target, true)
+        this.renderer.setRenderTarget(this.depth_pass.target)
+        this.renderer.clear()
+        this.renderer.render(this.scene, this.scene_camera)
         
         // bind material, draw
         this.scene.overrideMaterial = this.normal_pass.material
-        this.renderer.render(this.scene, this.scene_camera, this.normal_pass.target, true)
+        this.renderer.setRenderTarget(this.normal_pass.target)
+        this.renderer.clear()
+        this.renderer.render(this.scene, this.scene_camera)
     },
 
     compute_ssao: function () {
@@ -998,7 +1025,9 @@ Object.assign(HexaLab.Viewer.prototype, {
         this.fullscreen_quad.material             = this.ssao_pass.material
         
         // draw
-        this.renderer.render(this.scene, this.fullscreen_camera, this.ssao_pass.target, true)
+        this.renderer.setRenderTarget(this.ssao_pass.target)
+        this.renderer.clear()
+        this.renderer.render(this.scene, this.fullscreen_camera)
     },
 
     blend_in_ssao: function () {
@@ -1007,6 +1036,7 @@ Object.assign(HexaLab.Viewer.prototype, {
         this.scene.add(this.fullscreen_quad)
         this.scene.position.set(0, 0, 0)
 
+        this.renderer.setRenderTarget(null)
         this.fullscreen_quad.material = this.blur_pass.material
         this.renderer.render(this.scene, this.fullscreen_camera)
     },
@@ -1022,13 +1052,15 @@ Object.assign(HexaLab.Viewer.prototype, {
         const prev_clear_color = this.renderer.getClearColor().clone()
         const prev_clear_alpha = this.renderer.getClearAlpha()
         this.renderer.setClearColor(new THREE.Color(0, 0, -100000), 1.0)
-        this.renderer.clearTarget(this.viewpos_pass.target, true, true, true)
+        this.renderer.setRenderTarget(this.viewpos_pass.target)
+        this.renderer.clear(true, true, true)
         this.renderer.setClearColor(prev_clear_color, prev_clear_alpha)
 
         // bind material, fetch camera, draw
         this.scene.overrideMaterial = this.viewpos_pass.material
         const light_cam             = this.ao_pass.views[this.ao_pass.progress.view_i]
-        this.renderer.render(this.scene, light_cam, this.viewpos_pass.target, false)
+        this.renderer.setRenderTarget(this.viewpos_pass.target)
+        this.renderer.render(this.scene, light_cam)
     },
 
     compute_osao_step: function () {
@@ -1054,7 +1086,11 @@ Object.assign(HexaLab.Viewer.prototype, {
         this.fullscreen_quad.material = this.ao_pass.material
 
         // draw
-        this.renderer.render(this.scene, this.fullscreen_camera, this.ao_pass.progress.target, this.ao_pass.progress.view_i == 0)
+        this.renderer.setRenderTarget(this.ao_pass.progress.target)
+        if (this.ao_pass.progress.view_i == 0) {
+            this.renderer.clear()
+        }
+        this.renderer.render(this.scene, this.fullscreen_camera)
 
         // progress
         this.ao_pass.progress.view_i += 1
@@ -1155,11 +1191,11 @@ Object.assign(HexaLab.Viewer.prototype, {
                 new_color[i * 3 + 2] = color.array[i * 3 + 2] * (gpu_data[i * 4 + 2] - 1) / scale
             }
             
-            this.buffers.visible.surface.removeAttribute('color')
-            this.buffers.visible.surface.addAttribute('color', new THREE.BufferAttribute(new_color, 3))
+            this.buffers.visible.surface.deleteAttribute('color')
+            this.buffers.visible.surface.setAttribute('color', new THREE.BufferAttribute(new_color, 3))
         } else {
-            this.buffers.visible.surface.removeAttribute('color')
-            this.buffers.visible.surface.addAttribute('color', this.ao_pass.original_color)
+            this.buffers.visible.surface.deleteAttribute('color')
+            this.buffers.visible.surface.setAttribute('color', this.ao_pass.original_color)
         }
     },
 
