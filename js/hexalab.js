@@ -13,13 +13,13 @@ HexaLab.filters = [];
 HexaLab.BufferGeometry = function (backend) {
     this.surface = new THREE.BufferGeometry()
     this.wireframe = new THREE.BufferGeometry()
+    this.mesh = new THREE.BufferGeometry()
     this.backend = backend
 }
 
 Object.assign(HexaLab.BufferGeometry.prototype, {
     update: function () {
         this.surface.deleteAttribute('position')
-        const x = this.backend.surface_pos().size()
         if (this.backend.surface_pos().size() != 0) {
             const buffer = new Float32Array(Module.HEAPU8.buffer, this.backend.surface_pos().data(), this.backend.surface_pos().size() * 3)
             this.surface.setAttribute('position', new THREE.BufferAttribute(buffer, 3))
@@ -62,6 +62,35 @@ Object.assign(HexaLab.BufferGeometry.prototype, {
         if (this.backend.wireframe_alpha().size() != 0) {
             const buffer = new Float32Array(Module.HEAPU8.buffer, this.backend.wireframe_alpha().data(), this.backend.wireframe_alpha().size())
             this.wireframe.setAttribute('alpha', new THREE.BufferAttribute(buffer, 1))
+        }
+
+        this.mesh.deleteAttribute('position')
+        if (this.backend.mesh_vert_pos().size() != 0) {
+            const buffer = new Float32Array(Module.HEAPU8.buffer, this.backend.mesh_vert_pos().data(), this.backend.mesh_vert_pos().size() * 3)
+            this.mesh.setAttribute('position', new THREE.BufferAttribute(buffer, 3))
+        }
+        this.mesh.deleteAttribute('normal')
+        if (this.backend.mesh_vert_norm().size() != 0) {
+            const buffer = new Float32Array(Module.HEAPU8.buffer, this.backend.mesh_vert_norm().data(), this.backend.mesh_vert_norm().size() * 3)
+            this.mesh.setAttribute('normal', new THREE.BufferAttribute(buffer, 3))
+        } else {
+            this.mesh.computeVertexNormals()
+        }
+        this.mesh.deleteAttribute('color')
+        if (this.backend.mesh_vert_color().size() != 0) {
+            const buffer = new Float32Array(Module.HEAPU8.buffer, this.backend.mesh_vert_color().data(), this.backend.mesh_vert_color().size() * 3)
+            this.mesh.setAttribute('color', new THREE.BufferAttribute(buffer, 3))
+        }
+        this.mesh.setIndex(null)     // TODO ?
+        if (this.backend.mesh_ibuffer().size() != 0) {
+            let buffer = []
+            const data = this.backend.mesh_ibuffer().data()
+            const size = this.backend.mesh_ibuffer().size()
+            const t = new Int32Array(Module.HEAPU8.buffer, data, size)
+            for (let i = 0; i < size; ++i) {  // TODO no copy
+                buffer[i] = t[i]
+            } 
+            this.mesh.setIndex(buffer)
         }
     },
 })
@@ -270,6 +299,12 @@ HexaLab.Viewer = function (canvas_width, canvas_height) {
         self.renderables[name].wireframe = new THREE.LineSegments(self.buffers[buffer_name].wireframe, material)
         self.renderables[name].wireframe.frustumCulled = false  // TODO ?
     }
+    function make_renderable_mesh (material, name, buffer_name) {
+        buffer_name = buffer_name || name
+        self.renderables[name] = self.renderables[name] || {}
+        self.renderables[name].mesh = new THREE.Mesh(self.buffers[buffer_name].mesh, material)
+        self.renderables[name].mesh.frustumCulled = false  // TODO ?
+    }
 
     make_renderable_surface     (this.materials.visible_surface,                    'visible')
     make_renderable_surface     (this.materials.visible_surface_diffuse,            'visible_diffuse', 'visible')
@@ -288,6 +323,9 @@ HexaLab.Viewer = function (canvas_width, canvas_height) {
     make_renderable_wireframe   (this.materials.singularity_hidden_wireframe,       'hidden_full_singularity', 'full_singularity')
     // make_wireframe_renderable('boundary_singularity', this.visible_wireframe_material)
     // make_wireframe_renderable('boundary_creases', this.visible_wireframe_material)
+
+    make_renderable_mesh        (this.materials.visible_surface,                    'visible')
+    make_renderable_mesh        (this.materials.filtered_surface,                   'filtered')
 
     // additional meshes
     this.meshes = new THREE.Group() // TODO add_mesh api
@@ -1112,6 +1150,22 @@ Object.assign(HexaLab.Viewer.prototype, {
         this.renderer.render(this.scene, this.scene_camera)
     },
 
+    draw_mesh: function () {
+        console.log("HERE")
+        console.log(this.buffers.visible.mesh)
+        //console.log(this.buffers.filtered.surface.attributes)
+        //console.log(this.renderables.visible.mesh)
+        this.clear_scene()
+        //this.renderables.visible.mesh.material = 
+        this.scene.add(this.renderables.visible.mesh)
+        this.scene.position.set(this.mesh_offset.x, this.mesh_offset.y, this.mesh_offset.z)
+
+        // this.fresnel_transparency_pass.material.uniforms.uColor = { value: new THREE.Vector3(c.x, c.y, c.z) }
+        //this.scene.overrideMaterial = this.fresnel_transparency_pass.material
+
+        this.renderer.render(this.scene, this.scene_camera)
+    },
+
     draw_wireframe: function () {
         this.clear_scene()
         this.scene.add(this.renderables.visible.wireframe)
@@ -1239,6 +1293,7 @@ Object.assign(HexaLab.Viewer.prototype, {
 
         this.draw_wireframe()
         this.draw_singularity()
+        this.draw_mesh()
         this.draw_transparent()
         this.draw_extra_meshes()
         this.draw_hud()

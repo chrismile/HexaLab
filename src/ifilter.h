@@ -5,6 +5,7 @@
 namespace HexaLab {
     class IFilter {
     public:
+        virtual ~IFilter() {}
     	bool enabled = true;
 
         virtual void on_mesh_set(Mesh& mesh) {}

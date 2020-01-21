@@ -424,6 +424,14 @@ namespace HexaLab {
         return i;
     }
 
+    size_t App::add_mesh_vertex ( Vector3f pos, Vector3f norm, Vector3f color ) {
+        size_t i = visible_model.mesh_vert_pos.size();
+        visible_model.mesh_vert_pos.push_back ( pos );
+        visible_model.mesh_vert_norm.push_back ( norm );
+        visible_model.mesh_vert_color.push_back ( color );
+        return i;
+    }
+
     void App::add_triangle ( size_t i1, size_t i2, size_t i3 ) {
         visible_model.surface_ibuffer.push_back ( i1 );
         visible_model.surface_ibuffer.push_back ( i2 );
@@ -434,6 +442,12 @@ namespace HexaLab {
         full_model.surface_ibuffer.push_back ( i1 );
         full_model.surface_ibuffer.push_back ( i2 );
         full_model.surface_ibuffer.push_back ( i3 );
+    }
+
+    void App::add_mesh_triangle ( size_t i1, size_t i2, size_t i3 ) {
+        visible_model.mesh_ibuffer.push_back ( i1 );
+        visible_model.mesh_ibuffer.push_back ( i2 );
+        visible_model.mesh_ibuffer.push_back ( i3 );
     }
 
     void App::add_quad ( size_t i1, size_t i2, size_t i3, size_t i4 ) {
@@ -625,6 +639,45 @@ namespace HexaLab {
         add_full_triangle ( idx + 0, idx + 3, idx + 2 );
     }
 
+    void App::add_mesh_face ( Dart& dart, float normal_sign ) {
+        MeshNavigator nav = mesh->navigate ( dart );
+
+        // Faces are normally shared between two cells, but their data structure references only one of them, the 'main' (the first encountered when parsing the mesh file).
+        // If the normal sign is -1, it means that the cell we want to render is not the main.
+        // Therefore a flip cell is performed, along with a flip edge to maintain the winding.
+        if ( normal_sign == -1 ) {
+            nav = nav.flip_cell().flip_edge();
+        }
+
+        // If cell quality display is enabled, fetch the appropriate quality color.
+        // Otherwise use the defautl coloration (white for outer faces, yellow for everything else)
+        Vector3f color;
+
+        if ( is_quality_color_mapping_enabled() ) {
+            color = color_map.get ( mesh->normalized_hexa_quality[nav.cell_index()] );
+        } else {
+            color = nav.is_face_boundary() ? this->default_outside_color : this->default_inside_color;
+        }
+
+        nav = mesh->navigate ( dart );
+
+        if ( normal_sign == -1 ) {
+            nav = nav.flip_vert();    // TODO flip cell/edge instead? same thing?
+        }
+
+        Vert& vert = nav.vert();
+        Index idx = visible_model.mesh_vert_pos.size();
+
+        do {
+            add_mesh_vertex ( nav.vert().position, nav.face().normal * normal_sign, color );
+            nav = nav.rotate_on_face();
+        } while ( nav.vert() != vert );
+
+        add_mesh_triangle ( idx + 2, idx + 1, idx + 0 );
+        add_mesh_triangle ( idx + 0, idx + 3, idx + 2 );
+    }
+
+
     void App::prepare_geometry() {
         for ( size_t i = 0; i < mesh->faces.size(); ++i ) {
             MeshNavigator nav = mesh->navigate ( mesh->faces[i] );
@@ -640,8 +693,15 @@ namespace HexaLab {
             } else if ( mesh->is_marked ( nav.cell() ) && nav.dart().cell_neighbor == -1 ) {
                 this->add_filtered_face ( nav.flip_edge().dart() );
             }
+
+            // Add all unfiltered cells to full mesh (front- and backfaces)
+            if ( !mesh->is_marked ( nav.cell() ) ) {
+                this->add_mesh_face( nav.dart(), 1 );
+                this->add_mesh_face( nav.dart(), -1 );
+            }
         }
     }
+
     void App::build_gap_hexa ( const Vector3f pp[8], const Vector3f nn[6], const bool vv[8], const Vector3f ww[6] ) {
         if ( !vv[0] && !vv[1] && !vv[2] && !vv[3] && !vv[4] && !vv[5] && !vv[6] && !vv[7] ) {
             return;

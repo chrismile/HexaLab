@@ -20,6 +20,10 @@ vector<HexaLab::Index>*    get_surface_ibuffer ( Model& model )      { return &m
 vector<Vector3f>* get_wireframe_vert_pos ( Model& model )   { return &model.wireframe_vert_pos; }
 vector<Vector3f>* get_wireframe_vert_color ( Model& model ) { return &model.wireframe_vert_color; }
 vector<float>*    get_wireframe_vert_alpha ( Model& model ) { return &model.wireframe_vert_alpha; }
+vector<Vector3f>* get_mesh_vert_pos ( Model& model )        { return &model.mesh_vert_pos; }
+vector<Vector3f>* get_mesh_vert_norm ( Model& model )       { return &model.mesh_vert_norm; }
+vector<Vector3f>* get_mesh_vert_color ( Model& model )      { return &model.mesh_vert_color; }
+vector<HexaLab::Index>*   get_mesh_ibuffer ( Model& model )         { return &model.mesh_ibuffer; }
 
 // std::vector
 template<typename T> js_ptr buffer_data ( std::vector<T>& v ) { return ( js_ptr ) v.data(); }
@@ -137,6 +141,10 @@ EMSCRIPTEN_BINDINGS ( HexaLab ) {
     .function ( "wireframe_pos",          &get_wireframe_vert_pos, allow_raw_pointers() )
     .function ( "wireframe_color",        &get_wireframe_vert_color, allow_raw_pointers() )
     .function ( "wireframe_alpha",        &get_wireframe_vert_alpha, allow_raw_pointers() )
+    .function ( "mesh_vert_pos",          &get_mesh_vert_pos, allow_raw_pointers() )
+    .function ( "mesh_vert_norm",         &get_mesh_vert_norm, allow_raw_pointers() )
+    .function ( "mesh_vert_color",        &get_mesh_vert_color, allow_raw_pointers() )
+    .function ( "mesh_ibuffer",           &get_mesh_ibuffer, allow_raw_pointers() )
     ;
     class_<MeshStats> ( "Mesh" )
     .property ( "vert_count",             &MeshStats::vert_count )

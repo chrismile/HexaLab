@@ -154,11 +154,14 @@ namespace HexaLab {
         void add_filtered_face ( Dart& dart );
         void add_filtered_wireframe ( Dart& dart );
         void add_full_face ( Dart& dart );
+        void add_mesh_face ( Dart& dart, float normal_sign );
 
         size_t add_vertex ( Vector3f pos, Vector3f norm, Vector3f color );
         size_t add_full_vertex ( Vector3f pos, Vector3f norm, Vector3f color );
+        size_t add_mesh_vertex ( Vector3f pos, Vector3f norm, Vector3f color );
         void add_triangle ( size_t i1, size_t i2, size_t i3 );
         void add_full_triangle ( size_t i1, size_t i2, size_t i3 );
+        void add_mesh_triangle ( size_t i1, size_t i2, size_t i3 );
         void add_quad ( size_t i1, size_t i2, size_t i3, size_t i4 );
 
         void prepare_geometry();
