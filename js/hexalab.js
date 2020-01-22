@@ -262,7 +262,82 @@ HexaLab.Viewer = function (canvas_width, canvas_height) {
         depthWrite:                     false,
         depthTest:                      false,
     })
-    this.materials.full                 = new THREE.MeshBasicMaterial() 
+    this.materials.full                 = new THREE.MeshBasicMaterial()
+
+    // Per-pixel linked lists
+    if (this.isWebGL2ComputeAvailable) {
+        this.materials.linked_list_clear = new THREE.ShaderMaterial({
+            vertexShader: THREE.LinkedListClear.vertexShader,
+            fragmentShader: THREE.LinkedListClear.fragmentShader,
+            uniforms: {
+                viewportW: { value: this.width }
+            },
+            colorWrite: false,
+            depthWrite: false,
+            depthTest: false,
+            stencilWrite: false,
+        })
+        this.materials.linked_list_gather = new THREE.ShaderMaterial({
+            vertexShader: THREE.LinkedListResolve.vertexShader,
+            fragmentShader: THREE.LinkedListResolve.fragmentShader,
+            uniforms: {
+                viewportW: { value: this.width },
+                linkedListSize: { value: 0 } // set in on_linked_list_resize
+            },
+
+            colorWrite: false,
+            depthWrite: false,
+            depthTest: true,
+            depthFunc: THREE.LessDepth,
+            stencilWrite: true,
+            stencilRef: 1,
+            stencilFunc: THREE.AlwaysStencilFunc,
+            stencilZPass: THREE.ReplaceStencilOp,
+        })
+        this.materials.linked_list_resolve = new THREE.ShaderMaterial({
+            vertexShader: THREE.LinkedListResolve.vertexShader,
+            fragmentShader: THREE.LinkedListResolve.fragmentShader,
+            uniforms: {
+                viewportW: { value: this.width }
+            },
+            colorWrite: true,
+            depthWrite: false,
+            depthTest: true,
+            stencilWrite: false,
+            stencilRef: 1,
+            stencilFunc: THREE.EqualStencilFunc,
+
+            blending: THREE.CustomBlending,
+            blendEquation: THREE.AddEquation,
+            blendSrc: THREE.DstColorFactor,
+            blendDst: THREE.ZeroFactor,
+            transparent: true,
+        })
+        this.on_linked_list_resize(this.width, this.height)
+
+        let gl = this.renderer.getContext();
+        this.fragment_counter_buffer = gl.createBuffer()
+        gl.bindBuffer(gl.ATOMIC_COUNTER_BUFFER, this.fragment_counter_buffer)
+        gl.bufferData(gl.ATOMIC_COUNTER_BUFFER, new Uint32Array(1), gl.DYNAMIC_COPY)
+        gl.bindBufferBase(gl.ATOMIC_COUNTER_BUFFER, 0, this.fragment_counter_buffer)
+
+        /*let atomic_counter_clear_shader = gl.createShader(gl.COMPUTE_SHADER)
+        gl.shaderSource(atomic_counter_clear_shader, THREE.AtomicCounterClear.computeShader)
+        gl.compileShader(atomic_counter_clear_shader)
+        if (!gl.getShaderParameter(atomic_counter_clear_shader, gl.COMPILE_STATUS)) {
+            console.log(gl.getShaderInfoLog(atomic_counter_clear_shader))
+        }
+        this.atomic_counter_clear_shader = atomic_counter_clear_shader;
+
+        let atomic_counter_clear_shader_program = gl.createProgram()
+        gl.attachShader(atomic_counter_clear_shader_program, atomic_counter_clear_shader)
+        gl.linkProgram(atomic_counter_clear_shader_program)
+        if (!gl.getProgramParameter(atomic_counter_clear_shader_program, gl.LINK_STATUS)) {
+            console.log(gl.getProgramInfoLog(atomic_counter_clear_shader_program))
+        }
+        this.atomic_counter_clear_shader_program = atomic_counter_clear_shader_program;*/
+    }
+
 
     // BufferGeometry instances
     this.buffers = []
@@ -324,8 +399,9 @@ HexaLab.Viewer = function (canvas_width, canvas_height) {
     // make_wireframe_renderable('boundary_singularity', this.visible_wireframe_material)
     // make_wireframe_renderable('boundary_creases', this.visible_wireframe_material)
 
-    make_renderable_mesh        (this.materials.visible_surface,                    'visible')
-    make_renderable_mesh        (this.materials.filtered_surface,                   'filtered')
+    if (this.isWebGL2ComputeAvailable) {
+        make_renderable_mesh    (this.materials.linked_list_gather,                 'visible')
+    }
 
     // additional meshes
     this.meshes = new THREE.Group() // TODO add_mesh api
@@ -573,6 +649,7 @@ Object.assign(HexaLab.Viewer.prototype, {
         };
 
         if (WEBGL.isWebGL2ComputeAvailable() === false) {
+            this.isWebGL2ComputeAvailable = false
             document.getElementById("frame").appendChild(WEBGL.getWebGL2ComputeErrorMessage())
             this.renderer = new THREE.WebGLRenderer(contextAttributes)
             
@@ -584,6 +661,7 @@ Object.assign(HexaLab.Viewer.prototype, {
             this.renderer.getContext().getExtension("EXT_float_blend")*/
         } else {
             // Use WebGL 2.0 Compute if it is available
+            this.isWebGL2ComputeAvailable = true
             var canvas = document.createElement("canvas")
             document.getElementById("frame").appendChild(canvas)
             var context = canvas.getContext("webgl2-compute", contextAttributes)
@@ -913,6 +991,30 @@ Object.assign(HexaLab.Viewer.prototype, {
         this.blur_pass.material.uniforms.depthThreshold.value = mesh.min_edge_len * 0.5 + mesh.avg_edge_len * 0.5;
     },
 
+    on_linked_list_resize: function (width, height) {
+        // Maximum depth complexity of 16 fragments per pixel on average
+        this.linkedListSize = width * height * 16
+
+        this.materials.linked_list_clear.uniforms.viewportW.value = width
+        this.materials.linked_list_gather.uniforms.viewportW.value = width
+        this.materials.linked_list_resolve.uniforms.viewportW.value = width
+        this.materials.linked_list_gather.uniforms.linkedListSize = this.linkedListSize
+
+        let gl = this.renderer.getContext();
+        this.fragment_buffer = gl.createBuffer()
+        gl.bindBuffer(gl.SHADER_STORAGE_BUFFER, this.fragment_buffer)
+        //gl.bufferData(gl.SHADER_STORAGE_BUFFER, null, gl.DYNAMIC_COPY, 0, this.linkedListSize * 12) // 12 bytes per entry
+        gl.bufferData(gl.SHADER_STORAGE_BUFFER, new Uint32Array(this.linkedListSize * 3), gl.DYNAMIC_COPY) // 12 bytes per entry
+        gl.bindBufferBase(gl.SHADER_STORAGE_BUFFER, 0, this.fragment_buffer)
+
+        let num_pixels_on_canvas = width * height
+        this.start_offset_buffer = gl.createBuffer()
+        gl.bindBuffer(gl.SHADER_STORAGE_BUFFER, this.start_offset_buffer)
+        //gl.bufferData(gl.SHADER_STORAGE_BUFFER, null, gl.DYNAMIC_COPY, 0, num_pixels_on_canvas * 4) // 4 bytes per entry
+        gl.bufferData(gl.SHADER_STORAGE_BUFFER, new Uint32Array(num_pixels_on_canvas), gl.DYNAMIC_COPY) // 4 bytes per entry
+        gl.bindBufferBase(gl.SHADER_STORAGE_BUFFER, 0, this.start_offset_buffer)
+    },
+
     resize: function (width, height) {
         // width and height
         this.width = width
@@ -930,6 +1032,11 @@ Object.assign(HexaLab.Viewer.prototype, {
         // passes uniforms
         this.ssao_pass.material.uniforms.uSize.value.set(width, height)
         this.blur_pass.material.uniforms.uSize.value.set(width, height)
+
+        // per-pixel linked lists
+        if (this.isWebGL2ComputeAvailable) {
+            this.on_linked_list_resize(width, height)
+        }
 
         // screen render target
         this.renderer.setSize(width, height)
@@ -1151,19 +1258,49 @@ Object.assign(HexaLab.Viewer.prototype, {
     },
 
     draw_mesh: function () {
-        console.log("HERE")
-        console.log(this.buffers.visible.mesh)
-        //console.log(this.buffers.filtered.surface.attributes)
-        //console.log(this.renderables.visible.mesh)
+        if (!this.isWebGL2ComputeAvailable) {
+            console.log("Error: WebGL 2.0 Compute not supported!")
+            return
+        }
+
+        // Optional. We actually don't need to overwrite whatever render target is already set.
+        //this.renderer.setRenderTarget(null)
+
+        // Bind the two SSBOs and the ACB.
+        let gl = this.renderer.getContext();
+        gl.bindBufferBase(gl.SHADER_STORAGE_BUFFER, 0, this.fragment_buffer)
+        gl.bindBufferBase(gl.SHADER_STORAGE_BUFFER, 1, this.start_offset_buffer)
+        gl.bindBufferBase(gl.ATOMIC_COUNTER_BUFFER, 0, this.fragment_counter_buffer)
+
+        // Clear the linked list per-pixel data.
         this.clear_scene()
-        //this.renderables.visible.mesh.material = 
+        this.scene.add(this.fullscreen_quad)
+        this.scene.position.set(0, 0, 0)
+        this.fullscreen_quad.material = this.materials.linked_list_clear
+        this.renderer.render(this.scene, this.fullscreen_camera)
+
+        // Set the atomic counter to 0 in a compute shader. Unfortunately, WebGL 2.0 compute and
+        // OpenGL ES 3.1 don't have glClearBufferData, so this is necessary.
+        /*gl.useProgram(this.atomic_counter_clear_shader_program)
+        gl.dispatchCompute(1, 1, 1)
+        gl.memoryBarrier(gl.ATOMIC_COUNTER_BARRIER_BIT | gl.SHADER_STORAGE_BARRIER_BIT)*/
+        gl.bindBuffer(gl.ATOMIC_COUNTER_BUFFER, this.fragment_counter_buffer)
+        gl.bufferSubData(gl.ATOMIC_COUNTER_BUFFER, 0, new Uint32Array(1))
+
+        // Render the whole mesh in the gather pass.
+        this.clear_scene()
         this.scene.add(this.renderables.visible.mesh)
         this.scene.position.set(this.mesh_offset.x, this.mesh_offset.y, this.mesh_offset.z)
-
-        // this.fresnel_transparency_pass.material.uniforms.uColor = { value: new THREE.Vector3(c.x, c.y, c.z) }
-        //this.scene.overrideMaterial = this.fresnel_transparency_pass.material
-
         this.renderer.render(this.scene, this.scene_camera)
+        gl.memoryBarrier(gl.SHADER_STORAGE_BARRIER_BIT)
+
+        // Finally, invoke the resolve shader and clear the stencil buffer afterwrds.
+        this.clear_scene()
+        this.scene.add(this.fullscreen_quad)
+        this.scene.position.set(0, 0, 0)
+        this.fullscreen_quad.material = this.materials.linked_list_resolve
+        this.renderer.render(this.scene, this.fullscreen_camera)
+        this.renderer.clearStencil()
     },
 
     draw_wireframe: function () {
