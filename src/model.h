@@ -32,6 +32,7 @@ namespace HexaLab {
             wireframe_vert_color.clear();
             wireframe_vert_alpha.clear();
             mesh_vert_pos.clear();
+            mesh_vert_norm.clear();
             mesh_vert_color.clear();
             mesh_ibuffer.clear();
         }
